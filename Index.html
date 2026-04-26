@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Prediction Game</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body{font-family:Arial;background:#1e2a38;color:#fff;text-align:center}
+    input,button{padding:10px;margin:5px;border:none;border-radius:5px}
+    button{background:orange}
+    .grid{display:grid;grid-template-columns:repeat(6,1fr);gap:6px;max-width:400px;margin:auto}
+    .num{background:#444;padding:10px;border-radius:5px}
+    .sel{background:green}
+    #admin{display:none;margin-top:20px;border-top:1px solid #aaa}
+  </style>
+</head>
+<body>
+
+<h2>🎯 Prediction Game</h2>
+
+<!-- AUTH -->
+<div id="auth">
+  <input id="username" placeholder="Username"><br>
+  <input id="email" placeholder="Email"><br>
+  <input id="pass" type="password" placeholder="Password"><br>
+  <button onclick="signup()">Sign Up</button>
+  <button onclick="login()">Login</button>
+</div>
+
+<!-- GAME -->
+<div id="game" style="display:none">
+  <h3 id="user"></h3>
+  <h3 id="coins"></h3>
+
+  <p>Select up to 3 numbers</p>
+  <div id="nums" class="grid"></div>
+
+  <button onclick="play()">Play</button>
+  <p id="status"></p>
+
+  <hr>
+
+  <button id="adminBtn" style="display:none" onclick="adminLogin()">👑 M18 Admin</button>
+
+  <div id="admin">
+    <h3>Admin Panel</h3>
+
+    <input id="win" placeholder="Winning Number">
+    <button onclick="setResult()">Reveal Result</button>
+
+    <h4>💰 Give Coins</h4>
+    <input id="userCoin" placeholder="Username">
+    <input id="amt" placeholder="Coins">
+    <button onclick="giveCoins()">Add Coins</button>
+
+    <h4>🔑 Change Password</h4>
+    <input id="newPass" placeholder="New Password">
+    <button onclick="changePass()">Update</button>
+  </div>
+
+  <h3 id="result"></h3>
+</div>
+
+<!-- Firebase -->
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+
+<script>
+// 🔥 Firebase Config (Yaha apna daalo)
+const firebaseConfig = {
+  apiKey: "YOUR_API_KEY",
+  authDomain: "YOUR_PROJECT.firebaseapp.com",
+  projectId: "YOUR_PROJECT_ID"
+};
+firebase.initializeApp(firebaseConfig);
+
+const auth = firebase.auth();
+const db = firebase.firestore();
+
+const ADMIN_NAME = "M18";
+let ADMIN_PASS = localStorage.getItem("adminPass") || "M1618";
+
+let userData = null;
+let picks = [];
+
+// SIGNUP
+async function signup(){
+  let uname = username.value.trim();
+
+  let check = await db.collection("users").where("username","==",uname).get();
+  if(!check.empty){ alert("Username taken"); return; }
+
+  let cred = await auth.createUserWithEmailAndPassword(email.value, pass.value);
+
+  await db.collection("users").doc(cred.user.uid).set({
+    username: uname,
+    coins: 50,
+    picks:[]
+  });
+}
+
+// LOGIN
+function login(){
+  auth.signInWithEmailAndPassword(email.value, pass.value)
+  .catch(e=>alert(e.message));
+}
+
+// AFTER LOGIN
+auth.onAuthStateChanged(user=>{
+  if(!user) return;
+
+  document.getElementById("auth").style.display="none";
+  document.getElementById("game").style.display="block";
+
+  db.collection("users").doc(user.uid).onSnapshot(doc=>{
+    userData = doc.data();
+    document.getElementById("user").innerText="User: "+userData.username;
+    document.getElementById("coins").innerText="Coins: "+userData.coins;
+
+    if(userData.username === ADMIN_NAME){
+      document.getElementById("adminBtn").style.display="inline-block";
+    }
+  });
+
+  buildNums();
+  listenResult();
+});
+
+// NUMBERS
+function buildNums(){
+  let box = document.getElementById("nums");
+  box.innerHTML="";
+  for(let i=1;i<=30;i++){
+    let b=document.createElement("div");
+    b.innerText=i;
+    b.className="num";
+    b.onclick=()=>toggle(i,b);
+    box.appendChild(b);
+  }
+}
+
+function toggle(n,el){
+  if(picks.includes(n)){
+    picks=picks.filter(x=>x!=n);
+    el.classList.remove("sel");
+  } else {
+    if(picks.length>=3){ alert("Max 3 numbers"); return; }
+    picks.push(n);
+    el.classList.add("sel");
+  }
+}
+
+// PLAY
+async function play(){
+  let cost = picks.length*35;
+
+  if(userData.coins < cost){
+    alert("Not enough coins");
+    return;
+  }
+
+  await db.collection("users").doc(auth.currentUser.uid).update({
+    coins: userData.coins - cost,
+    picks: picks
+  });
+
+  await db.collection("round").doc("r1")
+    .collection("players").doc(auth.currentUser.uid)
+    .set({username:userData.username,picks:picks});
+
+  document.getElementById("status").innerText="✅ Submitted";
+}
+
+// ADMIN LOGIN
+function adminLogin(){
+  let pass = prompt("Enter Admin Password");
+
+  if(pass === ADMIN_PASS){
+    document.getElementById("admin").style.display="block";
+  } else {
+    alert("Wrong Password");
+  }
+}
+
+// SET RESULT
+async function setResult(){
+  let w = parseInt(document.getElementById("win").value);
+
+  await db.collection("round").doc("r1").set({win:w});
+}
+
+// LISTEN RESULT
+function listenResult(){
+  db.collection("round").doc("r1").onSnapshot(doc=>{
+    let d = doc.data();
+    if(!d) return;
+
+    let res = userData.picks.includes(d.win) ? "🎉 You Win" : "😢 You Lose";
+
+    document.getElementById("result").innerText =
+      "Winning Number: "+d.win+" | "+res;
+  });
+}
+
+// GIVE COINS
+async function giveCoins(){
+  let u = userCoin.value;
+  let a = parseInt(amt.value);
+
+  let snap = await db.collection("users").where("username","==",u).get();
+
+  snap.forEach(async doc=>{
+    let d = doc.data();
+    await db.collection("users").doc(doc.id).update({
+      coins:(d.coins||0)+a
+    });
+  });
+
+  alert("Coins Added");
+}
+
+// CHANGE PASS
+function changePass(){
+  let p = newPass.value;
+  localStorage.setItem("adminPass",p);
+  ADMIN_PASS = p;
+  alert("Password Updated");
+}
+</script>
+
+</body>
+</html>
